@@ -1,5 +1,5 @@
 use crate::{LookupService, ServiceDefinition};
-use std::collections::HashSet;
+use std::{collections::HashSet, time::Duration};
 use std::net::SocketAddr;
 use tokio::sync::mpsc::Sender;
 use tonic::transport::{channel::Endpoint, ClientTlsConfig};
@@ -37,6 +37,9 @@ where
     probe_interval: tokio::time::Duration,
     endpoint_timeout: Option<tokio::time::Duration>,
     endpoint_connect_timeout: Option<tokio::time::Duration>,
+    keep_alive_timeout: Option<Duration>,
+    http2_keep_alive_interval: Option<Duration>,
+    keep_alive_while_idle: bool,
     /// The set of last reported endpoints by `dns_lookup`.
     endpoints: HashSet<SocketAddr>,
     endpoint_reporter: Sender<Change<SocketAddr, Endpoint>>,
@@ -59,6 +62,9 @@ where
     pub endpoint_timeout: Option<tokio::time::Duration>,
     /// A connection timeout that will be applied to every endpoint.
     pub endpoint_connect_timeout: Option<tokio::time::Duration>,
+    pub keep_alive_timeout: Option<Duration>,
+    pub http2_keep_alive_interval: Option<Duration>,
+    pub keep_alive_while_idle: bool,
 }
 
 impl<Lookup: LookupService> GrpcServiceProbe<Lookup> {
@@ -78,6 +84,9 @@ impl<Lookup: LookupService> GrpcServiceProbe<Lookup> {
             endpoint_reporter,
             scheme: http::uri::Scheme::HTTP,
             tls_config: None,
+            keep_alive_timeout: config.keep_alive_timeout,
+            http2_keep_alive_interval: config.http2_keep_alive_interval,
+            keep_alive_while_idle: config.keep_alive_while_idle,
         }
     }
 
@@ -217,6 +226,15 @@ impl<Lookup: LookupService> GrpcServiceProbe<Lookup> {
 
         if let Some(ref timeout) = self.endpoint_timeout {
             endpoint = endpoint.timeout(*timeout);
+        }
+        if let Some(ref timeout) = self.keep_alive_timeout{
+            endpoint = endpoint.keep_alive_timeout(*timeout);
+        }
+        if let Some(ref inteval) = self.http2_keep_alive_interval{
+            endpoint = endpoint.http2_keep_alive_interval(*inteval);
+        }
+        if self.keep_alive_while_idle{
+            endpoint = endpoint.keep_alive_while_idle(true);
         }
         if let Some(ref connect_timeout) = self.endpoint_connect_timeout {
             endpoint = endpoint.connect_timeout(*connect_timeout)

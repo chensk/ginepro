@@ -101,6 +101,9 @@ pub struct LoadBalancedChannelBuilder<T, S> {
     resolution_strategy: ResolutionStrategy,
     timeout: Option<Duration>,
     connect_timeout: Option<Duration>,
+    keep_alive_timeout: Option<Duration>,
+    http2_keep_alive_interval: Option<Duration>,
+    keep_alive_while_idle: bool,
     tls_config: Option<ClientTlsConfig>,
     lookup_service: Option<T>,
 }
@@ -125,6 +128,9 @@ where
             tls_config: None,
             lookup_service: None,
             resolution_strategy: ResolutionStrategy::Lazy,
+            keep_alive_timeout: None,
+            http2_keep_alive_interval: None,
+            keep_alive_while_idle: false,
         }
     }
 
@@ -141,6 +147,9 @@ where
             timeout: self.timeout,
             connect_timeout: self.connect_timeout,
             resolution_strategy: self.resolution_strategy,
+            keep_alive_timeout: self.keep_alive_timeout,
+            http2_keep_alive_interval: self.http2_keep_alive_interval,
+            keep_alive_while_idle: self.keep_alive_while_idle,
         }
     }
 }
@@ -173,6 +182,27 @@ where
     pub fn connect_timeout(self, connection_timeout: Duration) -> LoadBalancedChannelBuilder<T, S> {
         Self {
             connect_timeout: Some(connection_timeout),
+            ..self
+        }
+    }
+
+    pub fn keep_alive_timeout(self, keep_alive_timeout: Duration) -> LoadBalancedChannelBuilder<T, S> {
+        Self {
+            keep_alive_timeout: Some(keep_alive_timeout),
+            ..self
+        }
+    }
+
+    pub fn http2_keep_alive_interval(self, http2_keep_alive_interval: Duration) -> LoadBalancedChannelBuilder<T, S> {
+        Self {
+            http2_keep_alive_interval: Some(http2_keep_alive_interval),
+            ..self
+        }
+    }
+
+    pub fn keep_alive_while_idle(self, keep_alive_while_idle: bool) -> LoadBalancedChannelBuilder<T, S> {
+        Self {
+            keep_alive_while_idle: keep_alive_while_idle,
             ..self
         }
     }
@@ -234,9 +264,13 @@ where
             dns_lookup: lookup_service,
             endpoint_timeout: self.timeout,
             endpoint_connect_timeout: self.connect_timeout.or(self.timeout),
+            
             probe_interval: self
                 .probe_interval
                 .unwrap_or_else(|| Duration::from_secs(10)),
+            keep_alive_timeout: self.keep_alive_timeout,
+            http2_keep_alive_interval: self.http2_keep_alive_interval,
+            keep_alive_while_idle: self.keep_alive_while_idle,
         };
 
         let tls_config = self.tls_config.map(|mut tls_config| {
