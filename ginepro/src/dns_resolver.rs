@@ -7,6 +7,7 @@ use std::net::SocketAddr;
 use trust_dns_resolver::{system_conf, AsyncResolver, TokioAsyncResolver};
 
 /// Implements [`LookupService`] by using DNS queries to lookup [`ServiceDefinition::hostname`].
+#[derive(Clone)]
 pub struct DnsResolver {
     /// The trust-dns resolver which contacts the dns service directly such
     /// that we bypass os-specific dns caching.

@@ -278,6 +278,7 @@ async fn connection_timeout_is_applied() {
 
 #[tokio::test]
 async fn builder_and_resolve_shall_fail_on_error() {
+    #[derive(Clone)]
     struct FailResolve;
     #[async_trait::async_trait]
     impl LookupService for FailResolve {
@@ -302,6 +303,7 @@ async fn builder_and_resolve_shall_fail_on_error() {
 
 #[tokio::test]
 async fn builder_and_resolve_shall_succeed_when_ips_are_returned() {
+    #[derive(Clone)]
     struct SucceedResolve;
     #[async_trait::async_trait]
     impl LookupService for SucceedResolve {
