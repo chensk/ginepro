@@ -67,6 +67,12 @@ impl LoadBalancedChannel {
     {
         LoadBalancedChannelBuilder::new_with_service(service_definition)
     }
+
+    pub fn get_channel(&mut self) -> Channel{
+        // we don't really need exactly strict ordering, relaxed is okay
+        let idx = self.1.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % self.0.len();
+        self.0.get_mut(idx).expect("invalid index").clone()
+    }
 }
 
 impl Service<http::Request<BoxBody>> for LoadBalancedChannel {
@@ -75,7 +81,6 @@ impl Service<http::Request<BoxBody>> for LoadBalancedChannel {
     type Future = <Channel as GrpcService<BoxBody>>::Future;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        // we don't really need exactly strict ordering, relaxed is okay
         let idx = self.1.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % self.0.len();
         GrpcService::poll_ready(self.0.get_mut(idx).expect("invalid index"), cx)
     }
