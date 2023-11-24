@@ -68,10 +68,10 @@ impl LoadBalancedChannel {
         LoadBalancedChannelBuilder::new_with_service(service_definition)
     }
 
-    pub fn get_channel(&mut self) -> Channel{
+    pub fn get_channel(&self) -> Channel{
         // we don't really need exactly strict ordering, relaxed is okay
         let idx = self.1.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % self.0.len();
-        self.0.get_mut(idx).expect("invalid index").clone()
+        self.0.get(idx).expect("invalid index").clone()
     }
 }
 
