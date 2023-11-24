@@ -9,7 +9,7 @@ use anyhow::Context as _;
 use http::Request;
 use std::{
     convert::TryInto,
-    task::{Context, Poll},
+    task::{Context, Poll}, sync::atomic::AtomicUsize,
 };
 use tokio::time::Duration;
 use tonic::client::GrpcService;
@@ -44,12 +44,12 @@ static GRPC_REPORT_ENDPOINTS_CHANNEL_SIZE: usize = 1024;
 /// }
 /// ```
 ///
-#[derive(Debug, Clone)]
-pub struct LoadBalancedChannel(Channel);
+#[derive(Debug)]
+pub struct LoadBalancedChannel(Vec<Channel>, AtomicUsize);
 
 impl From<LoadBalancedChannel> for Channel {
     fn from(channel: LoadBalancedChannel) -> Self {
-        channel.0
+        channel.0.into_iter().take(1).next().unwrap()
     }
 }
 
@@ -75,11 +75,14 @@ impl Service<http::Request<BoxBody>> for LoadBalancedChannel {
     type Future = <Channel as GrpcService<BoxBody>>::Future;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        GrpcService::poll_ready(&mut self.0, cx)
+        // we don't really need exactly strict ordering, relaxed is okay
+        let idx = self.1.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % self.0.len();
+        GrpcService::poll_ready(self.0.get_mut(idx).expect("invalid index"), cx)
     }
 
     fn call(&mut self, request: Request<BoxBody>) -> Self::Future {
-        GrpcService::call(&mut self.0, request)
+        let idx = self.1.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % self.0.len();
+        GrpcService::call(self.0.get_mut(idx).expect("invalid index"), request)
     }
 }
 
@@ -106,6 +109,7 @@ pub struct LoadBalancedChannelBuilder<T, S> {
     keep_alive_while_idle: bool,
     tls_config: Option<ClientTlsConfig>,
     lookup_service: Option<T>,
+    connection_number: usize,
 }
 
 impl<S> LoadBalancedChannelBuilder<DnsResolver, S>
@@ -131,6 +135,7 @@ where
             keep_alive_timeout: None,
             http2_keep_alive_interval: None,
             keep_alive_while_idle: false,
+            connection_number: 1,
         }
     }
 
@@ -150,11 +155,12 @@ where
             keep_alive_timeout: self.keep_alive_timeout,
             http2_keep_alive_interval: self.http2_keep_alive_interval,
             keep_alive_while_idle: self.keep_alive_while_idle,
+            connection_number: self.connection_number,
         }
     }
 }
 
-impl<T: LookupService + Send + Sync + 'static + Sized, S> LoadBalancedChannelBuilder<T, S>
+impl<T: LookupService + Send + Sync + 'static + Sized + Clone, S> LoadBalancedChannelBuilder<T, S>
 where
     S: TryInto<ServiceDefinition> + 'static,
     S::Error: Into<Box<dyn std::error::Error + Send + Sync>> + Send + Sync,
@@ -207,6 +213,19 @@ where
         }
     }
 
+    pub fn connection_number(self, connection_number: usize) -> LoadBalancedChannelBuilder<T, S>{
+        // 100 connections at most to avoid resource exhausted
+        let connection_number = if connection_number > 100{
+            100
+        }else{
+            connection_number
+        };
+        Self{
+            connection_number,
+            ..self
+        }
+    }
+
     /// Set the [`ResolutionStrategy`].
     ///
     /// Default set to [`ResolutionStrategy::Lazy`].
@@ -251,54 +270,56 @@ where
         lookup_service: U,
     ) -> Result<LoadBalancedChannel, anyhow::Error>
     where
-        U: LookupService + Send + Sync + 'static + Sized,
+        U: LookupService + Send + Sync + 'static + Sized + Clone,
     {
-        let (channel, sender) = Channel::balance_channel(GRPC_REPORT_ENDPOINTS_CHANNEL_SIZE);
-
-        let config = GrpcServiceProbeConfig {
-            service_definition: self
-                .service_definition
-                .try_into()
-                .map_err(Into::into)
-                .map_err(|err| anyhow::anyhow!(err))?,
-            dns_lookup: lookup_service,
-            endpoint_timeout: self.timeout,
-            endpoint_connect_timeout: self.connect_timeout.or(self.timeout),
-            
-            probe_interval: self
-                .probe_interval
-                .unwrap_or_else(|| Duration::from_secs(10)),
-            keep_alive_timeout: self.keep_alive_timeout,
-            http2_keep_alive_interval: self.http2_keep_alive_interval,
-            keep_alive_while_idle: self.keep_alive_while_idle,
-        };
-
-        let tls_config = self.tls_config.map(|mut tls_config| {
-            // Since we resolve the hostname to an IP, which is not a valid DNS name,
-            // we have to set the hostname explicitly on the tls config,
-            // otherwise the IP will be set as the domain name and tls handshake will fail.
-            tls_config = tls_config.domain_name(config.service_definition.hostname());
-
-            tls_config
-        });
-
-        let mut service_probe = GrpcServiceProbe::new_with_reporter(config, sender);
-
-        if let Some(tls_config) = tls_config {
-            service_probe = service_probe.with_tls(tls_config);
+        let service_definition = self.service_definition.try_into().map_err(Into::into).map_err(|err| anyhow::anyhow!(err))?;
+        let dns_lookup = lookup_service.clone();
+        let mut channels = Vec::with_capacity(self.connection_number);
+        for _ in 0..self.connection_number{
+            let (channel, sender) = Channel::balance_channel(GRPC_REPORT_ENDPOINTS_CHANNEL_SIZE);
+    
+            let config = GrpcServiceProbeConfig {
+                service_definition: service_definition.clone(),
+                dns_lookup: dns_lookup.clone(),
+                endpoint_timeout: self.timeout,
+                endpoint_connect_timeout: self.connect_timeout.or(self.timeout),
+                
+                probe_interval: self
+                    .probe_interval
+                    .unwrap_or_else(|| Duration::from_secs(10)),
+                keep_alive_timeout: self.keep_alive_timeout,
+                http2_keep_alive_interval: self.http2_keep_alive_interval,
+                keep_alive_while_idle: self.keep_alive_while_idle,
+            };
+    
+            let tls_config = self.tls_config.clone().map(|mut tls_config| {
+                // Since we resolve the hostname to an IP, which is not a valid DNS name,
+                // we have to set the hostname explicitly on the tls config,
+                // otherwise the IP will be set as the domain name and tls handshake will fail.
+                tls_config = tls_config.domain_name(config.service_definition.hostname());
+    
+                tls_config
+            });
+    
+            let mut service_probe = GrpcServiceProbe::new_with_reporter(config, sender);
+    
+            if let Some(tls_config) = tls_config {
+                service_probe = service_probe.with_tls(tls_config);
+            }
+    
+            if let ResolutionStrategy::Eager { timeout } = self.resolution_strategy {
+                // Make sure we resolve the hostname once before we create the channel.
+                tokio::time::timeout(timeout, service_probe.probe_once())
+                    .await
+                    .context("timeout out while attempting to resolve IPs")?
+                    .context("failed to resolve IPs")?;
+            }
+    
+            tokio::spawn(service_probe.probe());
+            channels.push(channel);
         }
 
-        if let ResolutionStrategy::Eager { timeout } = self.resolution_strategy {
-            // Make sure we resolve the hostname once before we create the channel.
-            tokio::time::timeout(timeout, service_probe.probe_once())
-                .await
-                .context("timeout out while attempting to resolve IPs")?
-                .context("failed to resolve IPs")?;
-        }
-
-        tokio::spawn(service_probe.probe());
-
-        Ok(LoadBalancedChannel(channel))
+        Ok(LoadBalancedChannel(channels, AtomicUsize::new(0)))
     }
 }
 

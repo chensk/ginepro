@@ -2,7 +2,7 @@ use anyhow::Context;
 
 /// Defines a gRPC service with a `hostname` and a `port`.
 /// The hostname will be resolved to the concrete ips of the service servers.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ServiceDefinition {
     /// The hostname of the service.
     hostname: String,

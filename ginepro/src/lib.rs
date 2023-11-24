@@ -28,6 +28,7 @@
 //! use std::net::SocketAddr;
 //!
 //! // This does nothing
+//! #[derive(Clone)]
 //! struct DummyLookupService;
 //!
 //! #[async_trait::async_trait]
