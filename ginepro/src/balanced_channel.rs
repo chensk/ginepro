@@ -8,8 +8,7 @@ use crate::{
 use anyhow::Context as _;
 use http::Request;
 use std::{
-    convert::TryInto,
-    task::{Context, Poll}, sync::atomic::AtomicUsize,
+    convert::TryInto, net::SocketAddr, sync::atomic::AtomicUsize, task::{Context, Poll}
 };
 use tokio::time::Duration;
 use tonic::client::GrpcService;
@@ -281,7 +280,7 @@ where
         let dns_lookup = lookup_service.clone();
         let mut channels = Vec::with_capacity(self.connection_number);
         for _ in 0..self.connection_number{
-            let (channel, sender) = Channel::balance_channel(GRPC_REPORT_ENDPOINTS_CHANNEL_SIZE);
+            let (channel, sender) = Channel::balance_channel::<SocketAddr>(GRPC_REPORT_ENDPOINTS_CHANNEL_SIZE);
     
             let config = GrpcServiceProbeConfig {
                 service_definition: service_definition.clone(),
