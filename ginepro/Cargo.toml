@@ -11,7 +11,7 @@ readme = "../README.md"
 
 [dependencies]
 tonic = { version = "0.14.1", features = ["tls-native-roots"] }
-tower = { version = "0.4", default-features = false, features = ["discover"] }
+tower = { version = "0.5", default-features = false, features = ["discover"] }
 anyhow = "1"
 tokio = { version = "1", features = ["full"] }
 trust-dns-resolver = "0.22.0"
