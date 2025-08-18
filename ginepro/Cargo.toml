@@ -10,7 +10,7 @@ categories = ["asynchronous", "web-programming"]
 readme = "../README.md"
 
 [dependencies]
-tonic = { version = "0.14.1", features = ["tls"] }
+tonic = { version = "0.14.1", features = ["tls-native-roots"] }
 tower = { version = "0.4", default-features = false, features = ["discover"] }
 anyhow = "1"
 tokio = { version = "1", features = ["full"] }
