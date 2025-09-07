@@ -10,14 +10,14 @@ categories = ["asynchronous", "web-programming"]
 readme = "../README.md"
 
 [dependencies]
-tonic = { version = "0.9", features = ["tls"] }
-tower = { version = "0.4", default-features = false, features = ["discover"] }
+tonic = { version = "0.14.1", features = ["tls-native-roots"] }
+tower = { version = "0.5", default-features = false, features = ["discover"] }
 anyhow = "1"
 tokio = { version = "1", features = ["full"] }
 trust-dns-resolver = "0.22.0"
 async-trait = "0.1"
 tracing = "0.1"
-http = "0.2"
+http = "1.0"
 thiserror = "1.0.29"
 
 [dev-dependencies]
